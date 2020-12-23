@@ -224,7 +224,7 @@ class ClashUp:
         update_cycle()
         # Init schedules and disable default logging
         logging.getLogger("schedule").propagate = False
-        schedule.every(self.config.get("update_interval")).seconds.do(update_cycle)
+        schedule.every(self.config.get("update_interval")).hours.do(update_cycle)
         schedule.every(5).seconds.do(supervise_clash)
         try:
             while True:
