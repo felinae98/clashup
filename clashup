@@ -31,7 +31,8 @@ class ClashUp:
     "custom_rules": [],
     "mmdb_file_url": "http://www.ideame.top/mmdb/Country.mmdb",
     "mmdb_version_url: "http://www.ideame.top/mmdb/version",
-    "periodically_update": false
+    "periodically_update": false,
+    "pm2": false
 }
 """
 
@@ -49,7 +50,9 @@ class ClashUp:
         if not os.path.isfile(self.conf_file_path):
             with open(self.conf_file_path, "w") as f:
                 f.write(self.EXAMPLE_CONF)
-            raise OSError("plz edit ~/.config/clash/clashup.json")
+            raise OSError(
+                "plz edit ~/.config/clash/clashup.json, set 'pm2' as true if using PM2"
+            )
         with open(self.conf_file_path) as f:
             raw_config_text = f.read()
             raw_config = json.loads(raw_config_text)
@@ -133,6 +136,12 @@ class ClashUp:
         except requests.exceptions.RequestException:
             logging.warning("Update mmdb failed")
 
+    def restart_clash(self):
+        if self.config.get("pm2", False):
+            subprocess.run(["pm2", "restart", "clash"])
+        else:
+            subprocess.run(["systemctl", "--user", "restart", "clash"])
+
     def update_time_cache(self):
         if not os.path.isfile(self.cache_file_path):
             self._write_cache()
@@ -161,6 +170,7 @@ class ClashUp:
         if args.update:
             self.update(False)
             self.update_mmdb()
+            self.restart_clash()
         elif args.pre and not self.config.get("periodically_update", False):
             if self.config["is_subscribe_banned"]:
                 logging.info("Subscribe is banned, pass this run")
@@ -173,11 +183,13 @@ class ClashUp:
             if self.config["is_subscribe_banned"]:
                 if self.update_time_cache():
                     self.update(True)
-                    subprocess.run(["systemctl", "--user", "restart", "clash"])
+                    self.restart_clash()
                 else:
                     logging.info("config file updated in 24h, pass this run")
             else:
                 logging.info("pass this run")
+        else:
+            parser.print_usage()
 
 
 if __name__ == "__main__":
