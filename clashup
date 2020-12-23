@@ -200,6 +200,7 @@ class ClashUp:
             else:
                 logging.info("pass this run")
         elif self.config.get("periodically_update", False):
+            update_subscription()
             schedule.every().day.at("12:00").do(update_subscription)
             try:
                 while True:
