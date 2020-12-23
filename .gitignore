@@ -2,3 +2,9 @@ pkg/*
 src/*
 *.tar.xz
 *.tar.zst
+
+.vscode/*
+*.code-workspace
+
+# Local History for Visual Studio Code
+.history/
