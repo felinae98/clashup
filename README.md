@@ -58,7 +58,7 @@ $ git clone https://github.com/felinae98/clashup && cd clashup
 $ chmod +x clashup
 
 # Copy script to /usr/local/bin
-$ cp clashup /usr/local/bin/
+$ sudo cp clashup /usr/local/bin/
 
 # Verify that clashup is in $PATH, executable, and works as expected
 $ clashup --update
