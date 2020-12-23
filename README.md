@@ -41,8 +41,7 @@ An active system-wide installation of Python 3 is required as well as extra Pyth
 $ sudo apt install python-is-python3
 
 # 2. Install libraries for system-installed Python 3
-$ sudo apt install python3-requests
-$ sudo apt install python3-daemon
+$ sudo apt install python3-requests python3-daemon python3-schedule
 
 # 3. Install PM2 and start clash
 $ wget -qO- https://getpm2.com/install.sh | bash
@@ -64,14 +63,19 @@ $ sudo cp clashup /usr/local/bin/
 $ clashup --update
 ```
 
-Finally enable `clashup` using PM2 with CRON enabled:
+You will need to edit configuration file `~/.config/clash/clashup.json`, specifially:
+
+* Set `pm2` as true.
+* Set `periodically_update` as true.
+
+Finally enable `clashup` using PM2:
 
 ```sh
 # Start clash with PM2 first
 $ pm2 start clash
 
-# Then start clashup with CRON job "at 12:00:00 PM every day"
-$ pm2 start clashup --cron "0 0 12 ? * * *"
+# Then start clashup
+$ pm2 start /usr/local/bin/clashup --interpreter python
 ```
 
 You might want to also enable PM2 on startup:
@@ -85,7 +89,7 @@ $ pm2 save
 
 ## Configurations
 
-The config file is `~/.config/clash/clashup.json`
+The config file is `~/.config/clash/clashup.json`:
 
 ```json
 {

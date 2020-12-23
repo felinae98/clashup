@@ -13,6 +13,7 @@ import time
 
 import daemon
 import requests
+import schedule
 import yaml
 
 logging.basicConfig(
@@ -172,11 +173,15 @@ class ClashUp:
         parser.add_argument("--post", action="store_true")
         parser.add_argument("--update", action="store_true")
         args = parser.parse_args()
-        self.load_conf()
-        if args.update:
+
+        def update_subscription():
             self.update(False)
             self.update_mmdb()
             self.restart_clash()
+
+        self.load_conf()
+        if args.update:
+            update_subscription()
         elif args.pre and not self.config.get("periodically_update", False):
             if self.config["is_subscribe_banned"]:
                 logging.info("Subscribe is banned, pass this run")
@@ -194,6 +199,14 @@ class ClashUp:
                     logging.info("config file updated in 24h, pass this run")
             else:
                 logging.info("pass this run")
+        elif self.config.get("periodically_update", False):
+            schedule.every().day.at("12:00").do(update_subscription)
+            try:
+                while True:
+                    schedule.run_pending()
+                    time.sleep(60)
+            except KeyboardInterrupt:
+                logging.info("exiting gracefully.")
         else:
             parser.print_usage()
 

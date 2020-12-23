@@ -9,6 +9,7 @@ url="https://github.com/felinae98/clashup"
 depends=(python
          clash
          python-requests
+         python-schedule
          python-daemon)
 source=(clashup clashup.conf clashup.service clashup.timer)
 package() {
