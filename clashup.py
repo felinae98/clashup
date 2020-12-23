@@ -11,8 +11,8 @@ import subprocess
 import sys
 import time
 
-import daemon
 import requests
+import schedule
 import yaml
 
 logging.basicConfig(format="%(asctime)s %(levelname)s: %(message)s", level=logging.INFO, stream=sys.stdout)
@@ -21,6 +21,8 @@ logging.basicConfig(format="%(asctime)s %(levelname)s: %(message)s", level=loggi
 class ClashUp:
 
     EXAMPLE_CONF = """{
+    "clash_path": "/usr/local/bin/clash",
+    "update_interval": 24,
     "http_port": 7890,
     "socks5_port": 7891,
     "redir_port": 7892,
@@ -32,8 +34,7 @@ class ClashUp:
     "is_subscribe_banned": false,
     "custom_rules": [],
     "mmdb_file_url": "http://www.ideame.top/mmdb/Country.mmdb",
-    "mmdb_version_url: "http://www.ideame.top/mmdb/version",
-    "periodically_update": false
+    "mmdb_version_url": "http://www.ideame.top/mmdb/version"
 }
 """
 
@@ -46,17 +47,36 @@ class ClashUp:
         self.mmdb_file_path = os.path.expanduser("~/.config/clash/Country.mmdb")
         self.session = requests.Session()
         self.session.trust_env = False
+        self.clash_proc = None
 
     def load_conf(self):
         if not os.path.isfile(self.conf_file_path):
             with open(self.conf_file_path, "w") as f:
                 f.write(self.EXAMPLE_CONF)
-            raise OSError("plz edit ~/.config/clash/clashup.json")
+            raise OSError("Created default config: ~/.config/clash/clashup.json, please edit")
+
         with open(self.conf_file_path) as f:
             raw_config_text = f.read()
             raw_config = json.loads(raw_config_text)
+
+        if not raw_config.get("clash_path"):
+            raw_config["clash_path"] = "/usr/local/bin/clash"
+            logging.warn("Didn't specify Clash executable path, defaulting to /usr/local/bin/clash")
+
+        update_interval = raw_config.get("update_interval")
+        if update_interval:
+            try:
+                raw_config["update_interval"] = max(1, min(int(update_interval), 24))
+            except Exception:
+                raw_config["update_interval"] = 24
+                logging.warn("Update interval invalid, defaulting to 24 hours")
+        else:
+            raw_config["update_interval"] = 24
+            logging.warn("Didn't specify update interval, defaulting to 24 hours")
+
         if not raw_config.get("subscribe_url"):
             raise ValueError("subscribe_url can not be empty")
+
         self.config = raw_config
         hash_item = hashlib.sha256(raw_config_text.encode())
         self.config_hash = hash_item.hexdigest()
@@ -89,6 +109,7 @@ class ClashUp:
         self._load_conf(config, "mixed_port", "mixed-port")
         self._load_conf(config, "allow_lan", "allow-lan")
         self._load_conf(config, "external_controller", "external-controller")
+        self._load_conf(config, "external_ui", "external-ui")
         config["rules"] = self.config.get("custom_rules", []) + config.get("rules", [])
         return config
 
@@ -99,14 +120,14 @@ class ClashUp:
             f.write(yaml.safe_dump(config))
 
     def update(self, use_proxy):
-        logging.info("Update Start")
+        logging.info("Updating subscription")
         try:
             raw_clash_conf = self.download(use_proxy)
             parsed_clash_conf = self.parse_config(raw_clash_conf)
             self.save(parsed_clash_conf)
-            logging.info("Update Finish")
+            logging.info("Updated")
         except requests.exceptions.RequestException:
-            logging.warning("Update Fail")
+            logging.warning("Update failed")
 
     def update_mmdb(self):
         try:
@@ -116,7 +137,7 @@ class ClashUp:
             if os.path.isfile(self.mmdb_version_file):
                 with open(self.mmdb_version_file, "r") as f:
                     if current_version == f.read():
-                        logging.info("pass mmdb update")
+                        logging.info("Ignoring mmdb update for this run")
                         return
             resp = self.session.get(self.config["mmdb_file_url"], proxies={"http": None, "https": None})
             resp.raise_for_status()
@@ -124,9 +145,9 @@ class ClashUp:
                 f.write(resp.content)
             with open(self.mmdb_version_file, "w") as f:
                 f.write(current_version)
-            logging.info("Update mmdb")
+            logging.info("Updated mmdb")
         except requests.exceptions.RequestException:
-            logging.warning("Update mmdb failed")
+            logging.warning("Failed to update mmdb")
 
     def update_time_cache(self):
         if not os.path.isfile(self.cache_file_path):
@@ -148,31 +169,69 @@ class ClashUp:
 
     def run(self):
         parser = argparse.ArgumentParser()
-        parser.add_argument("--pre", action="store_true")
-        parser.add_argument("--post", action="store_true")
         parser.add_argument("--update", action="store_true")
         args = parser.parse_args()
+
         self.load_conf()
         if args.update:
             self.update(False)
             self.update_mmdb()
-        elif args.pre and not self.config.get("periodically_update", False):
+            return
+
+        clash_executable = self.config.get("clash_path")
+        if not os.path.isfile(clash_executable):
+            raise FileNotFoundError(
+                f"Clash executable doesn't exist at {clash_executable}, please download latest Clash executable from"
+                f" https://github.com/Dreamacro/clash and copy it to {clash_executable}"
+            )
+
+        def invoke_clash():
+            # Invoke Clash as subprocess
+            self.clash_proc = subprocess.Popen([clash_executable])
+
+        def update_cycle():
+            # Pre-invoking Clash
             if self.config["is_subscribe_banned"]:
                 logging.info("Subscribe is banned, pass this run")
             else:
                 self.update(False)
             if self.config.get("mmdb_version_url") and self.config.get("mmdb_file_url"):
-                with daemon.DaemonContext():
-                    self.update_mmdb()
-        elif args.post and not self.config.get("periodically_update", False):
+                self.update_mmdb()
+
+            # Invoke Clash if not already started
+            if not self.clash_proc:
+                invoke_clash()
+
+            # Post-invoking Clash
             if self.config["is_subscribe_banned"]:
                 if self.update_time_cache():
                     self.update(True)
-                    subprocess.run(["systemctl", "--user", "restart", "clash"])
+                    self.clash_proc.terminate()
+                    invoke_clash()
                 else:
-                    logging.info("config file updated in 24h, pass this run")
+                    logging.info("Config file updated in 24h, pass this run")
             else:
-                logging.info("pass this run")
+                logging.info("Pass this run")
+
+        def supervise_clash():
+            # Supervise Clash process state and restart Clash if crashed
+            clash_state = self.clash_proc.poll()
+            if clash_state is not None:
+                logging.warning(f"Clash crashed with error code {clash_state}, restarting")
+                invoke_clash()
+
+        # Invoke update cycle manually for the first time
+        update_cycle()
+        # Init schedules and disable default logging
+        logging.getLogger("schedule").propagate = False
+        schedule.every(self.config.get("update_interval")).seconds.do(update_cycle)
+        schedule.every(5).seconds.do(supervise_clash)
+        try:
+            while True:
+                schedule.run_pending()
+                time.sleep(1)
+        except KeyboardInterrupt:
+            logging.info("Exiting gracefully")
 
 
 if __name__ == "__main__":
