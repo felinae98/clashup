@@ -7,11 +7,13 @@ license=('GPL')
 arch=('any')
 url="https://github.com/felinae98/clashup"
 depends=(python
+         python-pip
          clash
          python-requests
          python-daemon)
 source=(clashup clashup.conf clashup.service clashup.timer)
 package() {
+    pip install pyyaml
     install -Dm755 clashup ${pkgdir}/usr/bin/clashup
     install -Dm644 clashup.conf ${pkgdir}/etc/systemd/user/clash.service.d/clashup.conf
     install -Dm644 clashup.service ${pkgdir}/usr/lib/systemd/system/clashup.service
